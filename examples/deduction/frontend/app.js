@@ -118,7 +118,7 @@ function handleAvatarUpload(event) {
   if (!file) return;
 
   if (!file.type.startsWith('image/')) {
-    alert('请选择图片文件');
+    alert(t('upload_image_error'));
     return;
   }
 
@@ -172,7 +172,7 @@ function renderPresetButtons() {
 
     const tagSpan = document.createElement('span');
     tagSpan.className = 'preset-tag';
-    tagSpan.textContent = isOfficial ? '官方' : '自定义';
+    tagSpan.textContent = isOfficial ? t('official') : t('custom');
 
     wrapper.appendChild(img);
     wrapper.appendChild(nameSpan);
@@ -243,7 +243,7 @@ function selectPresetTemplate(templateKey, clickedBtn) {
 function saveAsPreset() {
   const name = document.getElementById('agentId').value.trim();
   if (!name) {
-    alert('请先输入人物名称');
+    alert(t('error_no_name'));
     return;
   }
 
@@ -289,10 +289,10 @@ function saveAsPreset() {
   userPresets[finalKey] = newPreset;
 
   if (saveUserPresets(userPresets)) {
-    alert(`预设 "${name}" 保存成功！`);
+    alert(t('save_preset_success'));
     renderPresetButtons();
   } else {
-    alert('保存预设失败，请重试');
+    alert(t('save_preset_error'));
   }
 }
 
@@ -302,11 +302,11 @@ function deletePreset(presetKey) {
   const preset = presets[presetKey];
 
   if (preset && preset.isOfficial) {
-    alert('官方预设不可删除');
+    alert(t('official_cannot_delete'));
     return;
   }
 
-  if (!confirm(`确定要删除预设 "${preset?.name || presetKey}" 吗？`)) {
+  if (!confirm(t('confirm_delete_preset'))) {
     return;
   }
 
@@ -805,7 +805,7 @@ function buildEventBubbles() {
 // 推断角色当前状态文字，优先使用后端数据，兜底用前端移动状态
 function getAgentStatusText(id) {
   const d = agentsData[id];
-  if (!d) return '闲逛中';
+  if (!d) return t('status_idle');
 
   // 1. 被他人占用（协助/聊天）
   if (d.occupied_by) {
@@ -834,7 +834,7 @@ function getAgentStatusText(id) {
     return loc ? `前往${loc.name}` : '移动中';
   }
 
-  return '闲逛中';
+  return t('status_idle');
 }
 
 
@@ -1132,7 +1132,7 @@ function renderManagePresetList() {
       <img src="${preset.avatarSource || '../map/sprite/普通人.png'}" alt="${preset.name}" class="preset-manage-avatar" onerror="this.src='../map/sprite/普通人.png'" />
       <div class="preset-manage-info">
         <span class="preset-manage-name">${preset.name}</span>
-        <span class="preset-manage-tag">${preset.isOfficial ? '官方预设' : '自定义预设'}</span>
+        <span class="preset-manage-tag">${preset.isOfficial ? t('official') : t('custom')}</span>
       </div>
       <div class="preset-manage-actions">
         ${!preset.isOfficial ? `<button class="btn-delete-preset" onclick="deletePreset('${key}'); renderManagePresetList();">删除</button>` : ''}
@@ -1351,14 +1351,14 @@ function sendCustomPlan(id) {
 function renderProfile(profile) {
   if (!profile) return '';
   const fields = [
-    { label: '家族', key: '家族' },
-    { label: '性格', key: '性格' },
-    { label: '核心驱动', key: '核心驱动' },
-    { label: '语言风格', key: '语言风格' }
+    { label: t('family_label'), key: '家族' },
+    { label: t('personality_label'), key: '性格' },
+    { label: t('drive_label'), key: '核心驱动' },
+    { label: t('style_label'), key: '语言风格' }
   ];
   
   const items = fields.map(f => {
-    const val = profile[f.key] || '未知';
+    const val = profile[f.key] || t('unknown');
     return `<div class="profile-item">
       <span class="profile-label">${f.label}：</span>
       <span class="profile-value">${escHtml(val)}</span>
@@ -1368,7 +1368,7 @@ function renderProfile(profile) {
   return `<section class="info-section">
     <div class="section-title"><span class="section-icon">志</span>人物志</div>
     <div class="profile-grid">${items}</div>
-    ${profile['背景经历'] ? `<div class="profile-bio"><strong>背景：</strong>${escHtml(profile['背景经历'])}</div>` : ''}
+    ${profile['背景经历'] ? `<div class="profile-bio"><strong>' + t('profile_background') + '</strong>${escHtml(profile['背景经历'])}</div>` : ''}
   </section>`;
 }
 
@@ -1391,7 +1391,7 @@ function renderExperiences(dialogues, shortTermMemory, agentId) {
     return `
       <div class="experience-card clickable-plan" onclick="openModal(event, '${agentId.replace(/'/g, "\\'")}', ${tick})">
         <div class="experience-header">
-          <span class="experience-tick">Tick ${tick}</span>
+          <span class="experience-tick">${t('time_tick')} ${tick}</span>
           <span class="experience-tag">对话录</span>
         </div>
         <div class="experience-summary">${escHtml(truncate(summary, 80))}</div>
@@ -1590,7 +1590,7 @@ function renderMemory(title, memories, type) {
   const sorted = [...memories].sort((a, b) => (b.tick ?? 0) - (a.tick ?? 0));
   const items = sorted.map(m => `
     <div class="memory-card ${type}-memory">
-      <span class="memory-tick">Tick ${m.tick ?? '?'}</span>
+      <span class="memory-tick">${t('time_tick')} ${m.tick ?? '?'}</span>
       <div class="memory-content">${escHtml(m.content ?? '')}</div>
     </div>`).join('');
   return `<section class="info-section">
@@ -3338,15 +3338,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // }
 });
 
+// 保存弹窗打开时的初始配置状态
+let initialConfigState = null;
+
 async function openSettingsModal() {
   document.getElementById('settingsModal').style.display = 'block';
   try {
     const res = await fetch('http://localhost:8000/api/config/model');
     if (res.ok) {
       const config = await res.json();
-      document.getElementById('settingsBaseUrl').value = config.base_url || '';
-      document.getElementById('settingsApiKey').value = config.api_key || '';
-      document.getElementById('settingsModel').value = config.model || '';
+      const base_url = config.base_url || '';
+      const api_key = config.api_key || '';
+      const model = config.model || '';
+      
+      document.getElementById('settingsBaseUrl').value = base_url;
+      document.getElementById('settingsApiKey').value = api_key;
+      document.getElementById('settingsModel').value = model;
+      
+      // 记录初始状态以便比较
+      initialConfigState = { base_url, api_key, model };
     }
   } catch (e) {
     console.error('Failed to fetch settings:', e);
@@ -3355,6 +3365,7 @@ async function openSettingsModal() {
 
 function closeSettingsModal() {
   document.getElementById('settingsModal').style.display = 'none';
+  initialConfigState = null;
 }
 
 async function saveSettings() {
@@ -3362,8 +3373,25 @@ async function saveSettings() {
   const apiKey = document.getElementById('settingsApiKey').value.trim();
   const model = document.getElementById('settingsModel').value.trim();
 
+  // 检查是否发生变化
+  const hasChanges = !initialConfigState || 
+                     initialConfigState.base_url !== baseUrl || 
+                     initialConfigState.api_key !== apiKey || 
+                     initialConfigState.model !== model;
+
+  // 如果没有修改配置，直接关闭弹窗即可，避免重启后端
+  if (!hasChanges) {
+    closeSettingsModal();
+    return;
+  }
+
   if (!apiKey) {
-    alert('请填写 API Key');
+    alert(t('error_no_api_key') || '请填写 API Key');
+    return;
+  }
+
+  // 发生变化时，提示用户修改配置会导致系统重启
+  if (!confirm(t('confirm_save_settings') || '修改模型配置将会重启后端服务，当前进度可能会中断。确定要保存并重启吗？')) {
     return;
   }
 
@@ -3374,15 +3402,15 @@ async function saveSettings() {
       body: JSON.stringify({ base_url: baseUrl, api_key: apiKey, model: model })
     });
     if (res.ok) {
-      alert('保存成功！后端正在自动重启以应用新配置，请稍候。');
+      alert(t('save_settings_success') || '保存成功！后端正在自动重启以应用新配置，请稍候。');
       isReconnectingAfterRestart = true;
       closeSettingsModal();
     } else {
-      alert('保存失败：' + (await res.text()));
+      alert((t('save_settings_error') || '保存失败：') + (await res.text()));
     }
   } catch (e) {
     console.error('Failed to save settings:', e);
-    alert('保存失败，请检查网络连接');
+    alert(t('save_settings_network_error') || '保存失败，请检查网络连接');
   }
 }
 
