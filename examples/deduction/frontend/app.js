@@ -1368,7 +1368,7 @@ function renderProfile(profile) {
   return `<section class="info-section">
     <div class="section-title"><span class="section-icon">志</span>人物志</div>
     <div class="profile-grid">${items}</div>
-    ${profile['背景经历'] ? `<div class="profile-bio"><strong>' + t('profile_background') + '</strong>${escHtml(profile['背景经历'])}</div>` : ''}
+    ${profile['背景经历'] ? `<div class="profile-bio"><strong>${t('profile_background')}</strong>${escHtml(profile['背景经历'])}</div>` : ''}
   </section>`;
 }
 
