@@ -1135,7 +1135,7 @@ function openBubbleModal(bubble) {
   summaryEl.style.display = 'block';
   content.innerHTML = '<div class="empty-text" style="padding:16px;opacity:0.5;">暂无对话记录</div>';
   setActiveDialogueContext(id, tick);
-  modal.style.display = 'block';
+  modal.classList.add('open');
 }
 
 function getHourlyPlanForTick(hourlyPlans, tick) {
@@ -1532,7 +1532,7 @@ function openModal(event, agentId, tick) {
   renderDialogueParticipants(history);
   bindDialogueHighlightInteractions();
   setActiveDialogueContext(agentId, tick);
-  modal.style.display = 'block';
+  modal.classList.add('open');
 }
 
 function closeModal() {
@@ -1541,7 +1541,7 @@ function closeModal() {
   refreshDialogueSidebar();
   renderDialogueParticipants([]);
   renderDialogueMiniMap(Date.now());
-  document.getElementById('dialogueModal').style.display = 'none';
+  document.getElementById('dialogueModal').classList.remove('open');
 }
 
 // ===== 添加人物功能 =====
@@ -1729,10 +1729,8 @@ function handleAddAgentResponse(msg) {
 }
 
 window.onclick = function(event) {
-  const dialogueModal = document.getElementById('dialogueModal');
   const addAgentModal = document.getElementById('addAgentModal');
   const managePresetModal = document.getElementById('managePresetModal');
-  if (event.target === dialogueModal) closeModal();
   if (event.target === addAgentModal) closeAddAgentModal();
   if (event.target === managePresetModal) closeManagePresetModal();
 };
