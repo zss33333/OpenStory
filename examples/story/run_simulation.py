@@ -131,7 +131,8 @@ async def main():
             },
             "static_mounts": {
                 "/frontend": os.path.join(project_path, "frontend"),
-                "/map": os.path.join(project_path, "map"),
+                # 直接指向真实路径，避免 StaticFiles 不跟随软链接
+                "/map": os.path.join(project_path, "..", "deduction", "map"),
                 "/data": os.path.join(project_path, "data"),
             }
         }

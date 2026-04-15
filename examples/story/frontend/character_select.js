@@ -2,12 +2,21 @@ let characters = [];
 let selectedCharacter = null;
 
 async function loadCharacters() {
+  const grid = document.getElementById('charGrid');
   try {
     const resp = await fetch('/data/characters.json');
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    }
     characters = await resp.json();
     renderGrid();
   } catch (e) {
     console.error('Failed to load characters:', e);
+    grid.innerHTML = `<div style="color:#c86e6e;padding:20px;font-size:0.85rem;line-height:1.8;">
+      角色数据加载失败<br>
+      <span style="color:#8a7560;font-size:0.75rem;">${e.message}</span><br><br>
+      <span style="color:#8a7560;font-size:0.75rem;">请确认服务器已启动：<br>python -m examples.story.run_simulation</span>
+    </div>`;
   }
 }
 
