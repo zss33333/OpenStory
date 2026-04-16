@@ -1851,20 +1851,21 @@ function renderBranchTree() {
       const isViewing = isViewingHistory && tick === viewingTick && branch.id === viewingBranchId;
       const isLiveCurrentTick = branch.id === currentBranchId && tick === lastTickOfCurrentBranch && !isViewingHistory;
 
-      const nodeAttr = `data-bid="${branch.id}" data-t="${tick}"`;
-
+      // Decorative rings (no pointer events)
       if (isViewing) {
-        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 5}" fill="none" stroke="#a0a0ff" stroke-width="2" stroke-dasharray="4 2"/>`;
+        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 5}" fill="none" stroke="#a0a0ff" stroke-width="2" stroke-dasharray="4 2" pointer-events="none"/>`;
       }
       if (isLiveCurrentTick) {
-        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 4}" fill="none" stroke="#e94560" stroke-width="2" stroke-dasharray="3 2" opacity="0.8"/>`;
+        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 4}" fill="none" stroke="#e94560" stroke-width="2" stroke-dasharray="3 2" opacity="0.8" pointer-events="none"/>`;
       }
 
       const nodeStroke = isLiveCurrentTick ? '#fff' : 'rgba(255,255,255,0.4)';
       const nodeStrokeW = isLiveCurrentTick ? 2 : 1;
       const nodeFill = isLiveCurrentTick ? '#e94560' : color;
-      html += `<circle cx="${x}" cy="${y}" r="${NODE_R}" fill="${nodeFill}" stroke="${nodeStroke}" stroke-width="${nodeStrokeW}" style="cursor:pointer" ${nodeAttr}/>`;
-      html += `<text x="${x}" y="${y + NODE_R + 14}" text-anchor="middle" fill="${color}" font-size="10" style="cursor:pointer" ${nodeAttr}>T${tick}</text>`;
+      html += `<circle cx="${x}" cy="${y}" r="${NODE_R}" fill="${nodeFill}" stroke="${nodeStroke}" stroke-width="${nodeStrokeW}" pointer-events="none"/>`;
+      html += `<text x="${x}" y="${y + NODE_R + 14}" text-anchor="middle" fill="${color}" font-size="10" pointer-events="none">T${tick}</text>`;
+      // Transparent large circle as unified hit area covering node + label
+      html += `<circle cx="${x}" cy="${y + 8}" r="${NODE_R + 14}" fill="transparent" style="cursor:pointer" data-bid="${branch.id}" data-t="${tick}"/>`;
     });
   });
 
@@ -1876,26 +1877,32 @@ function renderBranchTree() {
     const x = tickToX[lastTick] + NODE_R + 8;
     const y = branchToY[branch.id];
     const label = branch.id === 0 ? 'Main' : `Branch ${branch.id}`;
-    html += `<text x="${x}" y="${y + 4}" fill="${color}" font-size="9" opacity="0.7">${label}</text>`;
+    html += `<text x="${x}" y="${y + 4}" fill="${color}" font-size="9" opacity="0.7" pointer-events="none">${label}</text>`;
   });
 
   svg.innerHTML = html;
 
-  // Event delegation: handle node clicks centrally
-  svg.onclick = function(e) {
-    const el = e.target.closest('[data-bid]');
-    if (!el) return;
-    const branchId = parseInt(el.getAttribute('data-bid'));
-    const tick = parseInt(el.getAttribute('data-t'));
-    onClickTreeNode(branchId, tick);
-  };
+  // Bind directly — no closest() dependency
+  svg.querySelectorAll('[data-bid]').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      onClickTreeNode(
+        parseInt(el.getAttribute('data-bid')),
+        parseInt(el.getAttribute('data-t'))
+      );
+    });
+  });
 
   renderBranchLegend();
 }
 
 function onClickTreeNode(branchId, tick) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: 'view_tick', tick, branch_id: branchId }));
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn('Memory Tree: WS not connected');
+    return;
+  }
+  console.log('Memory Tree: jump to branch=' + branchId + ' tick=' + tick);
+  ws.send(JSON.stringify({ type: 'view_tick', tick: tick, branch_id: branchId }));
   if (memoryTreeOpen) toggleMemoryTree();
 }
 

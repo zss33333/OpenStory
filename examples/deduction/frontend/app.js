@@ -4444,20 +4444,21 @@ function renderBranchTree() {
       const isViewing = isViewingHistory && tick === viewingTick && branch.id === viewingBranchId;
       const isLiveCurrentTick = branch.id === currentBranchId && tick === lastTickOfCurrentBranch && !isViewingHistory;
 
-      const nodeAttr = `data-bid="${branch.id}" data-t="${tick}"`;
-
+      // 装饰圆环（无点击区域）
       if (isViewing) {
-        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 5}" fill="none" stroke="#a0a0ff" stroke-width="2" stroke-dasharray="4 2"/>`;
+        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 5}" fill="none" stroke="#a0a0ff" stroke-width="2" stroke-dasharray="4 2" pointer-events="none"/>`;
       }
       if (isLiveCurrentTick) {
-        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 4}" fill="none" stroke="#e94560" stroke-width="2" stroke-dasharray="3 2" opacity="0.8"/>`;
+        html += `<circle cx="${x}" cy="${y}" r="${NODE_R + 4}" fill="none" stroke="#e94560" stroke-width="2" stroke-dasharray="3 2" opacity="0.8" pointer-events="none"/>`;
       }
 
       const nodeStroke = isLiveCurrentTick ? '#fff' : 'rgba(255,255,255,0.4)';
       const nodeStrokeW = isLiveCurrentTick ? 2 : 1;
       const nodeFill = isLiveCurrentTick ? '#e94560' : color;
-      html += `<circle cx="${x}" cy="${y}" r="${NODE_R}" fill="${nodeFill}" stroke="${nodeStroke}" stroke-width="${nodeStrokeW}" style="cursor:pointer" ${nodeAttr}/>`;
-      html += `<text x="${x}" y="${y + NODE_R + 14}" text-anchor="middle" fill="${color}" font-size="10" style="cursor:pointer" ${nodeAttr}>T${tick}</text>`;
+      html += `<circle cx="${x}" cy="${y}" r="${NODE_R}" fill="${nodeFill}" stroke="${nodeStroke}" stroke-width="${nodeStrokeW}" pointer-events="none"/>`;
+      html += `<text x="${x}" y="${y + NODE_R + 14}" text-anchor="middle" fill="${color}" font-size="10" pointer-events="none">T${tick}</text>`;
+      // 透明大圆作为统一点击区域，覆盖节点 + 文字
+      html += `<circle cx="${x}" cy="${y + 8}" r="${NODE_R + 14}" fill="transparent" style="cursor:pointer" data-bid="${branch.id}" data-t="${tick}"/>`;
     });
   });
 
@@ -4469,26 +4470,32 @@ function renderBranchTree() {
     const x = tickToX[lastTick] + NODE_R + 8;
     const y = branchToY[branch.id];
     const label = branch.id === 0 ? '主线' : `分支${branch.id}`;
-    html += `<text x="${x}" y="${y + 4}" fill="${color}" font-size="9" opacity="0.7">${label}</text>`;
+    html += `<text x="${x}" y="${y + 4}" fill="${color}" font-size="9" opacity="0.7" pointer-events="none">${label}</text>`;
   });
 
   svg.innerHTML = html;
 
-  // 事件委托：统一处理节点点击
-  svg.onclick = function(e) {
-    const el = e.target.closest('[data-bid]');
-    if (!el) return;
-    const branchId = parseInt(el.getAttribute('data-bid'));
-    const tick = parseInt(el.getAttribute('data-t'));
-    onClickTreeNode(branchId, tick);
-  };
+  // 直接绑定，不依赖 closest / 事件委托
+  svg.querySelectorAll('[data-bid]').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      onClickTreeNode(
+        parseInt(el.getAttribute('data-bid')),
+        parseInt(el.getAttribute('data-t'))
+      );
+    });
+  });
 
   renderBranchLegend();
 }
 
 function onClickTreeNode(branchId, tick) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: 'view_tick', tick, branch_id: branchId }));
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn('记忆树：WS 未连接');
+    return;
+  }
+  console.log('记忆树：跳转到 branch=' + branchId + ' tick=' + tick);
+  ws.send(JSON.stringify({ type: 'view_tick', tick: tick, branch_id: branchId }));
   if (memoryTreeOpen) toggleMemoryTree();
 }
 
