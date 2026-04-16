@@ -313,10 +313,6 @@ function connect() {
       const msg = JSON.parse(e.data);
       if (msg.type === 'snapshot' || msg.type === 'tick_update') {
         pendingTickData = msg;
-        if (msg.tick && msg.tick > 0) {
-          const settingsBtn = document.getElementById('settingsBtn');
-          if (settingsBtn) settingsBtn.style.display = 'none';
-        }
         document.getElementById('startTickBtn').disabled = true;
         document.getElementById('applyTickBtn').disabled = false;
       } else if (msg.type === 'add_agent_response') {
