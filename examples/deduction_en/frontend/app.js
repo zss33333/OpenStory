@@ -101,8 +101,20 @@ let viewDays = {};
 let pendingTickData = null; 
 let agentsWithNewAction = new Set(); 
 let eventBubbles = []; 
-let tickHistory = []; 
-let currentHistoryIndex = -1; 
+let tickHistory = [];
+let currentHistoryIndex = -1;
+
+// ── Memory Tree / Branch State ─────────────────────────────────────────────
+const BRANCH_COLORS = [
+  '#ffd700','#4fc3f7','#81c784','#ff8a65',
+  '#ce93d8','#80deea','#ffb74d','#f48fb1',
+];
+let branchTree = [];          // branch metadata list from backend
+let currentBranchId = 0;      // which branch is actively simulating
+let viewingTick = -1;         // tick being viewed in history mode (-1 = latest)
+let viewingBranchId = -1;     // branch of the viewed tick
+let isViewingHistory = false; // true when user has jumped to a past tick
+let memoryTreeOpen = false;   // modal visibility
 
 const OFFICIAL_PRESETS = {
   sunwukong: {
@@ -326,6 +338,29 @@ function connect() {
             if (!agentSprites[name]) { const img = new Image(); img.src = `../map/sprite/${name}.png`; agentSprites[name] = img; }
           }
           renderAgentList();
+        }
+      } else if (msg.type === 'branch_tree') {
+        branchTree = msg.branches || [];
+        currentBranchId = msg.current_branch_id ?? 0;
+        renderBranchTree();
+
+      } else if (msg.type === 'branch_created') {
+        branchTree = msg.branches || [];
+        currentBranchId = msg.current_branch_id ?? 0;
+        isViewingHistory = false;
+        viewingTick = -1;
+        viewingBranchId = -1;
+        updateHistoryModeBanner();
+        renderBranchTree();
+
+      } else if (msg.type === 'view_tick_ack') {
+        if (msg.data) {
+          viewingTick = msg.tick;
+          viewingBranchId = msg.branch_id;
+          isViewingHistory = true;
+          applyAgentsData(msg.data, msg.tick);
+          updateHistoryModeBanner();
+          renderBranchTree();
         }
       }
     } catch (err) { console.error('parse error', err); }
@@ -1698,5 +1733,50 @@ async function confirmReset() {
       const res = await fetch('http://localhost:8000/api/reset', { method: 'POST', });
       if (res.ok) { alert('Reset command sent! Please wait.'); isReconnectingAfterRestart = true; } else { alert('Reset failed: ' + (await res.text())); }
     } catch (e) { alert('Network error'); }
+  }
+}
+
+// ── Memory Tree Functions ──────────────────────────────────────────────────
+
+function toggleMemoryTree() {
+  memoryTreeOpen = !memoryTreeOpen;
+  const overlay = document.getElementById('memoryTreeOverlay');
+  if (overlay) overlay.style.display = memoryTreeOpen ? 'flex' : 'none';
+  if (memoryTreeOpen) renderBranchTree();
+}
+
+function handleMemoryTreeOverlayClick(event) {
+  if (event.target === document.getElementById('memoryTreeOverlay')) {
+    toggleMemoryTree();
+  }
+}
+
+function exitHistoryView() {
+  isViewingHistory = false;
+  viewingTick = -1;
+  viewingBranchId = -1;
+  updateHistoryModeBanner();
+  if (Object.keys(agentsData).length > 0) {
+    applyAgentsData(agentsData, currentTick);
+  }
+  renderBranchTree();
+}
+
+function updateHistoryModeBanner() {
+  const banner = document.getElementById('historyModeBanner');
+  const bannerText = document.getElementById('historyModeBannerText');
+  const innerBanner = document.getElementById('historyViewBanner');
+  const innerText = document.getElementById('historyViewText');
+
+  if (!banner) return;
+
+  if (isViewingHistory && viewingTick !== -1) {
+    banner.style.display = 'flex';
+    if (bannerText) bannerText.textContent = `⏪ Viewing Tick ${viewingTick} · Click "Apply Tick" to fork a new branch`;
+    if (innerBanner) innerBanner.style.display = 'flex';
+    if (innerText) innerText.textContent = `Viewing Tick ${viewingTick}`;
+  } else {
+    banner.style.display = 'none';
+    if (innerBanner) innerBanner.style.display = 'none';
   }
 }
