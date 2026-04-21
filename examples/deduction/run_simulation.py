@@ -144,7 +144,51 @@ async def main():
         server_module._tick_start_event = tick_start_event
         # Pass the pod_manager reference to the server module to support dynamically adding agents
         server_module._pod_manager = pod_manager
-        
+
+        # ── Story server launcher endpoint ────────────────────────────────────────
+        import subprocess as _subprocess
+        import socket as _socket
+        import atexit as _atexit
+        _story_process = None
+
+        def _is_port_open(port, host="127.0.0.1", timeout=0.5):
+            try:
+                with _socket.create_connection((host, port), timeout=timeout):
+                    return True
+            except OSError:
+                return False
+
+        def _kill_story_process():
+            if _story_process is not None and _story_process.poll() is None:
+                _story_process.terminate()
+                try:
+                    _story_process.wait(timeout=5)
+                except Exception:
+                    _story_process.kill()
+
+        _atexit.register(_kill_story_process)
+
+        from fastapi.responses import JSONResponse as _JSONResponse
+
+        @server_module.app.post("/api/launch-story")
+        async def launch_story():
+            nonlocal _story_process
+            if _is_port_open(8001):
+                return _JSONResponse({"status": "already_running"})
+            if _story_process is None or _story_process.poll() is not None:
+                _story_process = _subprocess.Popen(
+                    [sys.executable, "-m", "examples.story.run_simulation"],
+                    cwd=project_root,
+                )
+            # Wait up to 30s for story server to be ready
+            import asyncio as _asyncio
+            for _ in range(60):
+                if _is_port_open(8001):
+                    return _JSONResponse({"status": "ready"})
+                await _asyncio.sleep(0.5)
+            return _JSONResponse({"status": "timeout"}, status_code=503)
+        # ─────────────────────────────────────────────────────────────────────────
+
         server_thread = threading.Thread(
             target=start_server,
             args=[server_config],
