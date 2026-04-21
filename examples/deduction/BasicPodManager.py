@@ -72,9 +72,11 @@ class BasicPodManager(PodManagerImpl):
                         remote_call("state", "is_active"),
                         remote_call("state", "get_inactive_reason"),
                         remote_call("state", "get_state", "current_tick"),
+                        remote_call("state", "get_replan_log"),
+                        remote_call("state", "get_long_task_adjustment_log"),
                     )
-                    
-                    long_task, current_plan, current_plan_note, current_action, occupied_by, dialogues, hourly_plans, short_mem, long_mem, profile, is_active, inactive_reason, current_tick = results
+
+                    long_task, current_plan, current_plan_note, current_action, occupied_by, dialogues, hourly_plans, short_mem, long_mem, profile, is_active, inactive_reason, current_tick, replan_log, long_task_adj_log = results
 
                     # Calculate time index based on current tick and extract target location from the day's plan
                     tick_val = current_tick or 0
@@ -114,6 +116,8 @@ class BasicPodManager(PodManagerImpl):
                         "inactive_reason": inactive_reason,
                         "current_tick": current_tick or 0,
                         "current_location": current_location,
+                        "replan_log": replan_log or [],
+                        "long_task_adj_log": long_task_adj_log or [],
                     }
                 except Exception as exc:
                     logger.error("collect_agents_data: failed for agent %s: %s", agent_id, exc)
@@ -160,9 +164,11 @@ class BasicPodManager(PodManagerImpl):
                 remote_call("state", "is_active"),
                 remote_call("state", "get_inactive_reason"),
                 remote_call("state", "get_state", "current_tick"),
+                remote_call("state", "get_replan_log"),
+                remote_call("state", "get_long_task_adjustment_log"),
             )
 
-            long_task, current_plan, current_plan_note, current_action, occupied_by, dialogues, hourly_plans, short_mem, long_mem, profile, is_active, inactive_reason, current_tick = results
+            long_task, current_plan, current_plan_note, current_action, occupied_by, dialogues, hourly_plans, short_mem, long_mem, profile, is_active, inactive_reason, current_tick, replan_log, long_task_adj_log = results
 
             tick_val = current_tick or 0
             current_location = None
@@ -199,6 +205,8 @@ class BasicPodManager(PodManagerImpl):
                 "inactive_reason": inactive_reason,
                 "current_tick": current_tick or 0,
                 "current_location": current_location,
+                "replan_log": replan_log or [],
+                "long_task_adj_log": long_task_adj_log or [],
             }
         except Exception as exc:
             logger.error(f"collect_single_agent_data: failed for agent {agent_id}: {exc}")
@@ -216,3 +224,32 @@ class BasicPodManager(PodManagerImpl):
             logger.info("Update agent status completed across all pods.")
         except Exception as exc:
             logger.error("Failed to update agent status: %s", exc, exc_info=True)
+
+    async def restore_all_agents(self, snapshot: Dict[str, Any]) -> None:
+        """
+        Restore all agents to a previously saved state snapshot.
+        Called during branch fork to roll back Ray actor state.
+
+        Args:
+            snapshot: dict of { agent_id -> agent_state_dict } as saved by collect_agents_data
+        """
+        sem = asyncio.Semaphore(10)
+
+        async def restore_one(agent_id: str, state: dict) -> None:
+            async with sem:
+                pod = self._agent_id_to_pod.get(agent_id)
+                if pod is None:
+                    logger.warning(f"restore_all_agents: agent '{agent_id}' not found in pod map")
+                    return
+                try:
+                    await asyncio.wait_for(
+                        pod.forward.remote("run_agent_method", agent_id, "state", "restore_state", state),
+                        timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"restore_all_agents: timeout restoring agent '{agent_id}'")
+                except Exception as exc:
+                    logger.error(f"restore_all_agents: failed for '{agent_id}': {exc}")
+
+        await asyncio.gather(*(restore_one(aid, state) for aid, state in snapshot.items()))
+        logger.info(f"restore_all_agents: restored {len(snapshot)} agents")
