@@ -300,6 +300,9 @@ async def main():
                             snapshot_key = (viewing_branch_id, viewing_tick)
                             if snapshot_key in server_module._tick_snapshots:
                                 logger.info(f"【Branch】Switching to branch {viewing_branch_id} frontier (tick {viewing_tick}) — no new branch")
+                                rollback_ok = await pod_manager.rollback_to_tick.remote(viewing_tick)
+                                if not rollback_ok:
+                                    logger.warning(f"【Branch】Environment rollback to tick {viewing_tick} reported failure while switching branch")
                                 await pod_manager.restore_all_agents.remote(server_module._tick_snapshots[snapshot_key])
                                 await system.run('timer', 'set_tick', viewing_tick + 1)
                                 restored_score = None
@@ -336,6 +339,9 @@ async def main():
                             snapshot_key = (viewing_branch_id, viewing_tick)
                             if snapshot_key in server_module._tick_snapshots:
                                 logger.info(f"【Branch】Forking new branch from tick {viewing_tick} on branch {viewing_branch_id}")
+                                rollback_ok = await pod_manager.rollback_to_tick.remote(viewing_tick)
+                                if not rollback_ok:
+                                    logger.warning(f"【Branch】Environment rollback to tick {viewing_tick} reported failure while forking branch")
                                 # 1. Restore agent states
                                 await pod_manager.restore_all_agents.remote(server_module._tick_snapshots[snapshot_key])
                                 # 2. Reset simulation timer to viewing_tick+1 so the next tick
@@ -407,6 +413,10 @@ async def main():
 
                 tick_duration = tick_end_time - tick_start_time
                 total_duration += tick_duration
+
+                snapshot_ok = await pod_manager.make_snapshot.remote()
+                if not snapshot_ok:
+                    logger.warning(f"【System】Adapter snapshot for Tick {current_tick} reported failure")
 
                 await system.run('timer', 'add_tick', duration_seconds=tick_duration)
 

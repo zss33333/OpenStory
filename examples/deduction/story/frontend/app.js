@@ -574,16 +574,24 @@ function connect() {
     try {
       const msg = JSON.parse(e.data);
       console.log('Parsed message type:', msg.type);
-      if (msg.type === 'snapshot' || msg.type === 'tick_update') {
-        // 缓存后端数据，等待用户点击”开始模拟”后再展示
+      if (msg.type === 'snapshot') {
+        // snapshot 仅用于重连后的状态同步，不应作为“新一轮待应用tick”。
+        if (Number.isInteger(msg.current_branch_id)) currentBranchId = msg.current_branch_id;
+        const msgCopy = JSON.parse(JSON.stringify(msg));
+        if (!Number.isInteger(msgCopy.current_branch_id)) msgCopy.current_branch_id = currentBranchId;
+        const { index } = upsertTickHistory(msgCopy);
+        currentHistoryIndex = index;
+        applyHistoryTick(tickHistory[currentHistoryIndex]);
+        const statusTxt = document.getElementById('statusText');
+        if (statusTxt) statusTxt.textContent = '已连接';
+      } else if (msg.type === 'tick_update') {
+        // 缓存后端数据，等待用户点击“开始推演”后再展示
+        if (Number.isInteger(msg.current_branch_id)) currentBranchId = msg.current_branch_id;
         pendingTickData = msg;
-
-        // 剧情模式：不隐藏设置按钮
 
         document.getElementById('startTickBtn').disabled = true;
         document.getElementById('applyTickBtn').disabled = false;
 
-        // 推演完成，更新状态文本提示用户可以开始模拟
         const statusTxt = document.getElementById('statusText');
         if (statusTxt) statusTxt.textContent = '推演完成';
         const statusDot = document.getElementById('statusDot');
@@ -683,6 +691,7 @@ function connect() {
       } else if (msg.type === 'branch_created') {
         branchTree = msg.branches || [];
         currentBranchId = msg.current_branch_id ?? 0;
+        pendingTickData = null;
         isViewingHistory = false;
         viewingTick = -1;
         viewingBranchId = -1;
@@ -701,6 +710,9 @@ function connect() {
         }
       } else if (msg.type === 'view_tick_ack') {
         if (msg.data) {
+          pendingTickData = null;
+          const applyBtn = document.getElementById('applyTickBtn');
+          if (applyBtn) applyBtn.disabled = true;
           viewingTick = msg.tick;
           viewingBranchId = msg.branch_id;
           isViewingHistory = true;
@@ -712,7 +724,7 @@ function connect() {
             const snapTick = newData[selectedAgent].current_tick ?? msg.tick;
             viewDays[selectedAgent] = Math.floor(snapTick / 12) + 1;
           }
-          applyAgentsData(newData, msg.tick);
+          applyAgentsData(newData, msg.tick, msg.branch_id);
           // 恢复该历史节点的稳定度分数与事件列表
           if (msg.score !== null && msg.score !== undefined) {
             restoreGoalPanelFromSnapshot(msg.score, msg.score_events || []);
@@ -996,7 +1008,26 @@ function updateTickNavButtons() {
   if (nextBtn) nextBtn.disabled = currentHistoryIndex >= tickHistory.length - 1;
 }
 
+function getTickHistoryKey(msg) {
+  const branchId = Number.isInteger(msg.current_branch_id) ? msg.current_branch_id : currentBranchId;
+  return `${branchId}:${msg.tick}`;
+}
+
+function upsertTickHistory(msg) {
+  const key = getTickHistoryKey(msg);
+  const idx = tickHistory.findIndex(item => getTickHistoryKey(item) === key);
+  if (idx >= 0) {
+    tickHistory[idx] = msg;
+    return { index: idx, inserted: false };
+  }
+  tickHistory.push(msg);
+  return { index: tickHistory.length - 1, inserted: true };
+}
+
 function applyHistoryTick(msg) {
+  if (Number.isInteger(msg.current_branch_id)) {
+    currentBranchId = msg.current_branch_id;
+  }
   currentTick = msg.tick;
   document.getElementById('tickNum').textContent = msg.tick >= 0 ? msg.tick : '—';
   if (msg.tick >= 0) {
@@ -1006,7 +1037,19 @@ function applyHistoryTick(msg) {
   
   // Create a deep copy to prevent modifications from affecting history
   const historyData = JSON.parse(JSON.stringify(msg.data));
+  const historyIds = new Set(Object.keys(historyData || {}));
+  Object.keys(agentsData).forEach(id => {
+    if (!historyIds.has(id)) {
+      delete agentsData[id];
+      delete agentIdleStates[id];
+      delete viewDays[id];
+    }
+  });
   mergeData(historyData);
+  Object.entries(historyData || {}).forEach(([id, d]) => {
+    const tickVal = Number.isFinite(Number(d?.current_tick)) ? Number(d.current_tick) : Number(msg.tick) || 0;
+    viewDays[id] = Math.floor(tickVal / 12) + 1;
+  });
   Object.keys(agentsData).forEach(id => agentsWithNewAction.add(id));
   buildEventBubbles();
   renderAgentList();
@@ -1036,10 +1079,10 @@ function applyPendingTick() {
   const msg = pendingTickData;
   pendingTickData = null;
   
-  // 保存到历史记录
   const msgCopy = JSON.parse(JSON.stringify(msg));
-  tickHistory.push(msgCopy);
-  currentHistoryIndex = tickHistory.length - 1;
+  if (!Number.isInteger(msgCopy.current_branch_id)) msgCopy.current_branch_id = currentBranchId;
+  const { index } = upsertTickHistory(msgCopy);
+  currentHistoryIndex = index;
   updateTickNavButtons();
 
   const btn = document.getElementById('applyTickBtn');
@@ -4639,6 +4682,7 @@ async function returnToMainMenu() {
   try {
     const res = await fetch('http://localhost:8001/story/game_restart', { method: 'POST' });
     if (!res.ok) { alert('重置失败：' + (await res.text())); return; }
+    await fetch('http://localhost:8000/api/shutdown-story', { method: 'POST' });
   } catch (e) {
     alert('重置请求发送失败，请检查网络连接');
     return;
@@ -4685,8 +4729,16 @@ function exitHistoryView() {
   renderBranchTree();
 }
 
-function applyAgentsData(data, tick) {
-  applyHistoryTick({ tick, data });
+function applyAgentsData(data, tick, branchId = null) {
+  const msg = { tick, data };
+  if (Number.isInteger(branchId)) {
+    msg.current_branch_id = branchId;
+    const msgCopy = JSON.parse(JSON.stringify(msg));
+    const { index } = upsertTickHistory(msgCopy);
+    currentHistoryIndex = index;
+    updateTickNavButtons();
+  }
+  applyHistoryTick(msg);
 }
 
 function updateHistoryModeBanner() {

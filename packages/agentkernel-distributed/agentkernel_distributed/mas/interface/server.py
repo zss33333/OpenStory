@@ -417,6 +417,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.send_text(json.dumps({
             "type": "snapshot",
             "tick": _snapshot_tick,
+            "current_branch_id": _current_branch_id,
             "data": _agents_snapshot,
         }))
     await websocket.send_text(json.dumps({
@@ -697,7 +698,9 @@ async def broadcast_tick_data(tick: int, agents_data: Dict[str, Any]) -> None:
     """
     import copy
     global _agents_snapshot, _snapshot_tick, _tick_snapshots, _branches, _current_branch_id
-    _agents_snapshot = agents_data
+    # Keep the latest snapshot detached from the live objects returned by the
+    # running simulation so reconnects/history reads never observe future writes.
+    _agents_snapshot = copy.deepcopy(agents_data)
     _snapshot_tick = tick
 
     # 保存快照：以 (branch_id, tick) 为 key
@@ -715,6 +718,7 @@ async def broadcast_tick_data(tick: int, agents_data: Dict[str, Any]) -> None:
     payload = json.dumps({
         "type": "tick_update",
         "tick": tick,
+        "current_branch_id": _current_branch_id,
         "data": agents_data,
     }, ensure_ascii=False, default=str)
     await manager.broadcast(payload)
