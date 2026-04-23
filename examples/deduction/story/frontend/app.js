@@ -1038,10 +1038,11 @@ function setStatus(state) {
 // 发送开始推演信号给后端
 function sendStartTick() {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    // If we are viewing history, jump to latest before starting next tick
-    if (currentHistoryIndex !== -1 && currentHistoryIndex < tickHistory.length - 1) {
-      currentHistoryIndex = tickHistory.length - 1;
-      applyHistoryTick(tickHistory[currentHistoryIndex]);
+    // Keep explicit memory-tree selection intact so the backend can fork/switch
+    // from that node. Only restore the live frontier when the user is merely
+    // scrubbing history with the prev/next controls.
+    if (!isViewingHistory && currentHistoryIndex !== -1) {
+      restoreLatestHistoryForBranch(currentBranchId);
     }
     
     ws.send(JSON.stringify({ type: 'start_tick' }));
@@ -1083,8 +1084,41 @@ function upsertTickHistory(msg) {
   return { index: tickHistory.length - 1, inserted: true };
 }
 
-function applyHistoryTick(msg) {
-  if (Number.isInteger(msg.current_branch_id)) {
+function getLatestHistoryIndexForBranch(branchId) {
+  if (!Number.isInteger(branchId)) return -1;
+
+  const branch = branchTree.find(b => b.id === branchId);
+  const branchTicks = (branch?.ticks || []).slice().sort((a, b) => b - a);
+  for (const tick of branchTicks) {
+    const idx = tickHistory.findIndex(item => {
+      const itemBranchId = Number.isInteger(item.current_branch_id) ? item.current_branch_id : currentBranchId;
+      return itemBranchId === branchId && item.tick === tick;
+    });
+    if (idx !== -1) return idx;
+  }
+
+  for (let i = tickHistory.length - 1; i >= 0; i--) {
+    const itemBranchId = Number.isInteger(tickHistory[i].current_branch_id)
+      ? tickHistory[i].current_branch_id
+      : currentBranchId;
+    if (itemBranchId === branchId) return i;
+  }
+
+  return -1;
+}
+
+function restoreLatestHistoryForBranch(branchId) {
+  const idx = getLatestHistoryIndexForBranch(branchId);
+  if (idx === -1) return false;
+  currentHistoryIndex = idx;
+  applyHistoryTick(tickHistory[idx], { syncCurrentBranch: true });
+  updateTickNavButtons();
+  return true;
+}
+
+function applyHistoryTick(msg, options = {}) {
+  const { syncCurrentBranch = false } = options;
+  if (syncCurrentBranch && Number.isInteger(msg.current_branch_id)) {
     currentBranchId = msg.current_branch_id;
   }
   currentTick = msg.tick;
@@ -2216,7 +2250,7 @@ function renderDetail(id) {
     <div class="section-divider"><span>✧</span></div>
     ${renderExperiences(d.dialogues, d.short_term_memory, id)}
     <div class="section-divider"><span>✧</span></div>
-    ${renderHourlyPlans(d.hourly_plans, d.dialogues, id, d.occupied_by, d.current_plan_note, d.current_tick, d.replan_log, d.long_task_adj_log)}
+${renderHourlyPlans(d.hourly_plans, d.dialogues, id, d.occupied_by, d.current_plan_note, d.current_tick, d.replan_log, d.long_task_adj_log, d.plan_conflict_log)}
     <div class="section-divider"><span>✧</span></div>
     ${renderMemory('长期记忆', d.long_term_memory, 'long')}
   `;
@@ -2337,13 +2371,14 @@ function renderCurrentPlan(plan, actionDetail, occupiedBy, dialogues, agentId, p
   let content = '';
   const hasDialogue = dialogues && dialogues[tick];
   const clickableClass = hasDialogue ? ' clickable-plan' : '';
+  const hasPlanConflict = !!(occupiedBy && occupiedBy.conflict);
   const dialogueHint = hasDialogue ? '<span class="dialogue-hint">点击查看对话详录 ❧</span>' : '';
   
   const noteHtml = planNote ? `<div class="plan-note-fail">⚠️ ${escHtml(planNote)}</div>` : '';
 
   if (!plan && !actionDetail && !occupiedBy) {
     content = '<span class="empty-text">暂无行动</span>';
-  } else if (occupiedBy) {
+  } else if (hasPlanConflict) {
     // 处理被占用的情况
     const originalAction = Array.isArray(plan) ? plan[0] : (plan || '原计划');
     const occupierName = formatAgentName(occupiedBy.occupier);
@@ -2391,10 +2426,18 @@ function renderCurrentPlan(plan, actionDetail, occupiedBy, dialogues, agentId, p
   </section>`;
 }
 
-function renderHourlyPlans(plans, dialogues, agentId, currentOccupiedBy, currentPlanNote, tick, replanLog, longTaskAdjLog) {
+function renderHourlyPlans(plans, dialogues, agentId, currentOccupiedBy, currentPlanNote, tick, replanLog, longTaskAdjLog, planConflictLog) {
   const currentDay = Math.floor((tick || 0) / 12) + 1;
   const viewingDay = viewDays[agentId] || currentDay;
   const currentHour = (tick || 0) % 12;
+  const planConflictByHour = {};
+  if (Array.isArray(planConflictLog)) {
+    for (const ev of planConflictLog) {
+      if (ev && ev.day === viewingDay) {
+        planConflictByHour[ev.hour] = ev;
+      }
+    }
+  }
 
   // Build a lookup: day -> list of replan events, for quick access in rendering
   const replanByDay = {};
@@ -2484,7 +2527,8 @@ function renderHourlyPlans(plans, dialogues, agentId, currentOccupiedBy, current
     const replanBadge = replanedHours.has(time) ? '<span class="replan-badge">重规划</span>' : '';
 
     // 检查该时辰是否被占用
-    const isCurrentlyOccupied = (viewingDay === currentDay && time === currentHour) && currentOccupiedBy;
+    const hourConflict = planConflictByHour[time] || null;
+    const isCurrentlyOccupied = !!hourConflict || ((viewingDay === currentDay && time === currentHour) && currentOccupiedBy && currentOccupiedBy.conflict);
     // 检查该时辰是否有注释
     const hasNote = (viewingDay === currentDay && time === currentHour) && currentPlanNote;
     
@@ -2507,10 +2551,11 @@ function renderHourlyPlans(plans, dialogues, agentId, currentOccupiedBy, current
 
     let contentHtml = '';
     if (isCurrentlyOccupied) {
-      const occupierName = formatAgentName(currentOccupiedBy.occupier);
-      const newAction = currentOccupiedBy.action || '协助他人';
+      const occupierName = formatAgentName((hourConflict && hourConflict.occupier) || currentOccupiedBy.occupier);
+      const newAction = (hourConflict && hourConflict.new_action) || currentOccupiedBy.action || '协助他人';
+      const originalAction = (hourConflict && hourConflict.original_action) || action;
       contentHtml = `
-        <div class="hourly-action original-plan-crossed">${escHtml(action)}</div>
+        <div class="hourly-action original-plan-crossed">${escHtml(originalAction)}</div>
         <div class="hourly-conflict-desc">
           <span class="conflict-arrow">↓</span> 
           <strong>${escHtml(newAction)}</strong>
@@ -4784,9 +4829,7 @@ function exitHistoryView() {
     ws.send(JSON.stringify({ type: 'reset_view' }));
   }
   updateHistoryModeBanner();
-  if (tickHistory.length > 0) {
-    applyHistoryTick(tickHistory[tickHistory.length - 1]);
-  }
+  restoreLatestHistoryForBranch(currentBranchId);
   renderBranchTree();
 }
 
@@ -4799,7 +4842,7 @@ function applyAgentsData(data, tick, branchId = null) {
     currentHistoryIndex = index;
     updateTickNavButtons();
   }
-  applyHistoryTick(msg);
+  applyHistoryTick(msg, { syncCurrentBranch: false });
 }
 
 function updateHistoryModeBanner() {
