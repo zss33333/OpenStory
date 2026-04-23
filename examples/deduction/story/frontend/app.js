@@ -4,12 +4,28 @@
 let playerCharacter = null;
 let pendingTaskTick = null; // 玩家等待下达任务的 tick
 const ON_DEMAND_AGENT_IDS = new Set(['孙悟空', '甄嬛']);
+let playerCharacterRegistrationPromise = null;
+
+function registerPlayerCharacterOnServer() {
+  if (!playerCharacter) return Promise.resolve();
+  if (!playerCharacterRegistrationPromise) {
+    playerCharacterRegistrationPromise = fetch('http://localhost:8001/story/set_player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(playerCharacter)
+    }).catch(e => {
+      console.warn('Failed to set player character on server:', e);
+    });
+  }
+  return playerCharacterRegistrationPromise;
+}
 
 function initPlayerCharacter() {
+  if (playerCharacter) return playerCharacter;
   const stored = localStorage.getItem('story_player_character');
   if (!stored) {
     window.location.href = 'character_select.html';
-    return;
+    return null;
   }
   playerCharacter = JSON.parse(stored);
   document.getElementById('playerName').textContent = playerCharacter.id;
@@ -19,11 +35,8 @@ function initPlayerCharacter() {
   document.getElementById('assignTaskCharName').textContent = playerCharacter.id;
 
   // 通知服务器记录玩家角色（用于 InvokePlugin 校验）
-  fetch('http://localhost:8001/story/set_player', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(playerCharacter)
-  }).catch(e => console.warn('Failed to set player character on server:', e));
+  registerPlayerCharacterOnServer();
+  return playerCharacter;
 }
 
 // ===== 下达任务 =====
@@ -650,11 +663,9 @@ function connect() {
         // Backend flushed Redis for a new game session (may have wiped the player character
         // that was registered before the flush). Re-register so the backend can proceed.
         if (playerCharacter) {
-          fetch('http://localhost:8001/story/set_player', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(playerCharacter)
-          }).catch(e => console.warn('Re-register player after game_reset failed:', e));
+          playerCharacterRegistrationPromise = null;
+          registerPlayerCharacterOnServer()
+            .catch(e => console.warn('Re-register player after game_reset failed:', e));
         }
       } else if (msg.type === 'simulation_ready') {
         // Backend tick loop is now waiting for user input — enable the start button.
@@ -2702,6 +2713,9 @@ function finishLoadingAnimation() {
 
 // ===== Init =====
 async function startApp() {
+  if (!initPlayerCharacter()) return;
+  await registerPlayerCharacterOnServer();
+
   // 加载自定义头像
   loadCustomAvatars();
 
@@ -4597,7 +4611,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // if (currentTick <= 0) {
   //   setTimeout(openSettingsModal, 500);
   // }
-  initPlayerCharacter();
 });
 
 // 保存弹窗打开时的初始配置状态

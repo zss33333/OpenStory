@@ -107,6 +107,15 @@ function openCustomModal() {
 async function startGame() {
   if (!selectedCharacter) return;
   localStorage.setItem('story_player_character', JSON.stringify(selectedCharacter));
+  try {
+    await fetch('http://localhost:8001/story/set_player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(selectedCharacter)
+    });
+  } catch (e) {
+    console.warn('Failed to pre-register player character on server:', e);
+  }
   window.location.href = 'index.html';
 }
 
