@@ -376,14 +376,20 @@ async def main():
                 resource_maps=RESOURCES_MAPS
             )
 
-            # Exclude 孙悟空 unless the player selected them.
+            # Exclude special on-demand agents unless the player selected them.
             # Custom characters (CUSTOM_*) are not in profiles.jsonl and never enter the pool.
-            _SWK_ID = '孙悟空'
-            if player_agent_id != _SWK_ID and sim_builder.config.agent_templates:
+            _ON_DEMAND_AGENT_IDS = {'孙悟空', '甄嬛'}
+            if sim_builder.config.agent_templates:
                 for _tmpl in sim_builder.config.agent_templates.templates:
-                    if _SWK_ID in _tmpl.agents:
-                        _tmpl.agents = [a for a in _tmpl.agents if a != _SWK_ID]
-                        logger.info(f"【System】Excluded {_SWK_ID} from agent pool (not selected by player).")
+                    excluded_agents = [
+                        agent_id for agent_id in _ON_DEMAND_AGENT_IDS
+                        if agent_id != player_agent_id and agent_id in _tmpl.agents
+                    ]
+                    if excluded_agents:
+                        _tmpl.agents = [a for a in _tmpl.agents if a not in excluded_agents]
+                        logger.info(
+                            f"【System】Excluded on-demand agents from pool (not selected by player): {excluded_agents}"
+                        )
 
             logger.info(f'【System】Start all the simulation components...')
             pod_manager, system = await sim_builder.init()

@@ -3,6 +3,7 @@
 // ===== 剧情模式：玩家角色初始化 =====
 let playerCharacter = null;
 let pendingTaskTick = null; // 玩家等待下达任务的 tick
+const ON_DEMAND_AGENT_IDS = new Set(['孙悟空', '甄嬛']);
 
 function initPlayerCharacter() {
   const stored = localStorage.getItem('story_player_character');
@@ -2575,9 +2576,9 @@ async function loadInitialProfiles() {
     characters.forEach(char => {
       const id = char.id;
       if (!id) return;
-      // Skip 孙悟空 unless the player selected them — backend excludes them from the simulation
-      // when not selected, so preloading would show a ghost character until first tick_update.
-      if (id === '孙悟空' && (!playerCharacter || playerCharacter.id !== id)) return;
+      // Skip on-demand agents unless the player selected them — backend excludes them
+      // from the simulation when not selected, so preloading would show ghost characters.
+      if (ON_DEMAND_AGENT_IDS.has(id) && (!playerCharacter || playerCharacter.id !== id)) return;
       initialData[id] = {
         profile: {
           ...char,
